@@ -9,6 +9,9 @@
 //   - payload.messages[i].content[j].name rewritten for historical tool_use
 //     and tool_result blocks (tool_result matches by tool_use_id only, but
 //     some SDK shapes carry `name` for debugging; we normalize if present)
+//   - inline tool changes (`inline-tools` beta) rewritten: tool_addition
+//     definitions and tool_removal references carry tool names too, and must
+//     match the names declared in payload.tools
 //   - system prompt text lightly rewritten for pi → "the cli" wording
 //     (helps Claude Code-style subscription endpoints avoid identity checks
 //     catching the word "pi")
@@ -82,8 +85,16 @@ function remapToolChoice(
 	return mapped ? { ...toolChoice, name: mapped } : toolChoice;
 }
 
+/**
+ * Rewrites tool names in message content: historical tool_use / tool_result
+ * blocks via `nameMap`, and inline tool changes via `rename`. A removed tool
+ * may be absent from payload.tools, so tool_removal cannot rely on `nameMap`;
+ * a tool_addition records its mapping so later tool_use blocks follow it.
+ * Messages are chronological, so additions are recorded before their uses.
+ */
 function remapMessageToolNames(
 	messages: unknown[],
+	rename: (name: string) => string,
 	nameMap: Map<string, string>,
 ): unknown[] {
 	let anyChange = false;
@@ -97,6 +108,21 @@ function remapMessageToolNames(
 				if (mapped && mapped !== block.name) {
 					msgChanged = true;
 					return { ...block, name: mapped };
+				}
+			}
+			const tool = block.tool;
+			if (block.type === "tool_removal" && isPlainObject(tool) && typeof tool.name === "string") {
+				const newName = rename(tool.name);
+				if (newName !== tool.name) {
+					msgChanged = true;
+					return { ...block, tool: { ...tool, name: newName } };
+				}
+			}
+			if (block.type === "tool_addition" && isPlainObject(tool) && isPlainObject(tool.definition)) {
+				const [definition] = remapTools([tool.definition], rename, nameMap) as [unknown];
+				if (definition !== tool.definition) {
+					msgChanged = true;
+					return { ...block, tool: { ...tool, definition } };
 				}
 			}
 			return block;
@@ -143,7 +169,7 @@ export function transformPayload(
 	}
 
 	if (Array.isArray(payload.messages)) {
-		payload.messages = remapMessageToolNames(payload.messages, nameMap);
+		payload.messages = remapMessageToolNames(payload.messages, rename, nameMap);
 	}
 
 	return { payload, nameMap };
