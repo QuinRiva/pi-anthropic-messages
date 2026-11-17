@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { strict as assert } from "node:assert";
+import { readFileSync, readdirSync } from "node:fs";
 import {
 	CC_CANONICAL_NAMES,
 	DEFAULT_MCP_PREFIX,
@@ -286,6 +287,57 @@ test("rewrites tool_choice when pointing at a renamed tool", () => {
 	assert.equal((payload.tool_choice as { name: string }).name, "mcp__pi__ask_user");
 });
 
+test("rewrites inline tool_removal references, including tools absent from payload.tools", () => {
+	const raw = {
+		tools: [{ name: "bash", description: "…", input_schema: {} }],
+		messages: [
+			{
+				role: "system",
+				content: [
+					{ type: "tool_removal", tool: { type: "tool_reference", name: "knowledge_search" } },
+					{ type: "tool_removal", tool: { type: "tool_reference", name: "read" } },
+					{ type: "tool_removal", tool: { type: "tool_reference", name: "mcp__exa__web_search" } },
+				],
+			},
+		],
+	};
+	const { payload } = transformPayload(raw, resolveOutboundName);
+	const sys = (payload.messages as Array<{ content: Array<{ tool: { name: string } }> }>)[0];
+	assert.deepEqual(
+		sys.content.map((b) => b.tool.name),
+		["mcp__pi__knowledge_search", "Read", "mcp__exa__web_search"],
+	);
+});
+
+test("rewrites inline tool_addition definitions and later tool_use blocks for them", () => {
+	const raw = {
+		tools: [{ name: "tool_search", description: "…", input_schema: {} }],
+		messages: [
+			{
+				role: "system",
+				content: [
+					{
+						type: "tool_addition",
+						tool: { type: "tool_definition", definition: { name: "web_search", description: "…", input_schema: {} } },
+					},
+				],
+			},
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "web_search", input: {} }],
+			},
+		],
+	};
+	const { payload, nameMap } = transformPayload(raw, resolveOutboundName);
+	const [sys, asst] = payload.messages as [
+		{ content: Array<{ tool: { definition: { name: string } } }> },
+		{ content: Array<{ name: string }> },
+	];
+	assert.equal(sys.content[0].tool.definition.name, "mcp__pi__web_search");
+	assert.equal(asst.content[0].name, "mcp__pi__web_search");
+	assert.equal(nameMap.get("web_search"), "mcp__pi__web_search");
+});
+
 test("does not mutate input payload", () => {
 	const raw = {
 		tools: [
@@ -473,4 +525,18 @@ test("canonical identity is scoped to registered tools only", () => {
 	const reverse = buildReverseMap(["bash", "read"]);
 	assert.equal(lookupReverse("Task_ide", reverse), undefined);
 	assert.equal(lookupReverse("Task", reverse), undefined);
+});
+
+// --- no logging ----------------------------------------------------------
+
+console.log("\nno debug logging (retired /tmp/pi-am.log leak):");
+
+test("extension source never imports node:fs nor names a log path", () => {
+	const dir = new URL("../extensions/", import.meta.url);
+	for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
+		const src = readFileSync(new URL(f, dir), "utf-8");
+		assert.ok(!/from\s+["']node:fs["']|require\(["'](node:)?fs["']\)/.test(src), `${f} imports fs`);
+		assert.ok(!src.includes("pi-am.log"), `${f} mentions pi-am.log`);
+		assert.ok(!src.includes("PI_ANTHROPIC_MESSAGES_DEBUG_LOG"), `${f} reads DEBUG_LOG env`);
+	}
 });

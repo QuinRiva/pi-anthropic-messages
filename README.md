@@ -32,8 +32,9 @@ This extension intervenes at the protocol layer:
   `bash`, `grep`) become their Claude Code capitalization (`Read`, `Write`,
   `Bash`, `Grep`). Everything else that isn't already canonical, already
   `mcp__*`-prefixed, or aliased to an Anthropic-native tool becomes
-  `mcp__pi__<name>`. `tool_choice.name` and historical `tool_use` blocks in
-  message history get the same rewrites. The system prompt is lightly
+  `mcp__pi__<name>`. `tool_choice.name`, historical `tool_use` blocks and
+  inline `tool_addition` / `tool_removal` blocks in message history get the
+  same rewrites. The system prompt is lightly
   rewritten (`pi` → `the cli`) so Claude Code identity fingerprints don't
   trip on the word "pi".
 - **Inbound** (`message_end`): translates the model's renamed tool calls

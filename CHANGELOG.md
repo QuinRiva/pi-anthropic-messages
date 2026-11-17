@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- **Inline tool changes are renamed too.** pi-ai's `inline-tools-2026-09-15` support emits mid-conversation `tool_addition` / `tool_removal` blocks in `role: "system"` messages, which the outbound transform left under pi names while `payload.tools` declared the renamed ones. Anthropic rejected every request carrying one (`400 … tool_addition/tool_removal references unknown tool 'knowledge_search'`), so any session resumed after a custom tool was removed could not continue. Removal references now go through the same rename as `payload.tools`; addition definitions are renamed and recorded in the name map, so later historical `tool_use` blocks for those tools stay consistent.
 
 ## [0.3.4] - 2026-06-18
 
